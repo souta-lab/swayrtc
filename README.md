@@ -2,13 +2,18 @@
 
 Ultra low latency browser remote desktop for Sway: a minimal Bun server for
 authentication + WebRTC signaling + UI, and a native Rust host that captures a
-Sway output with Intel Quick Sync and injects real Wayland input.
+Sway output and injects real Wayland input.
 
-Replaces the WayVNC + noVNC stack. The existing WayVNC instance and its
-Cloudflare tunnel are untouched and can keep running side by side.
+Capture is a custom wlr-screencopy client with three encode paths: software
+x264 (the default, latency first), VA-API, and a **cross-GPU zero-copy
+pipeline** — the AMD GPU's VPP converts the captured dma-buf to NV12, the
+Intel GPU encodes it with VA-API, and no pixel ever touches the CPU
+(~4% CPU at 1080p60; see *Zero copy: working, as an option* below).
+
+Replaces the WayVNC + noVNC stack (see *Relationship to WayVNC / noVNC*).
 
 ```
- browser (HTTPS/WSS)                    host (same machine, runs as s0u7a)
+ browser (HTTPS/WSS)                    host (same machine, runs as the service user)
  ┌──────────────────┐   signaling   ┌──────────────────────────────────────┐
  │ login  ── PAM ────────────────▶  │ Bun 127.0.0.1:8777                   │
  │ UI + WebRTC      │◀── SDP/ICE ──▶│  · PAM auth (pamtester)              │
@@ -20,7 +25,7 @@ Cloudflare tunnel are untouched and can keep running side by side.
  ┌────────────────────────┐          ┌──────────────────────────────────────┐
  │ Cloudflare Realtime    │◀────────▶│ swayrtc-host (Rust)                  │
  │ TURN  turn:…:3478/5349 │          │  · WebRTC peer, H.264 RTP            │
- └────────────────────────┘          │  · capture child (wf-recorder→H.264)│
+ └────────────────────────┘          │  · capture (wlr-screencopy → H.264)  │
                                      │  · Wayland virtual keyboard/pointer  │
                                      └──────────────────────────────────────┘
 ```
@@ -30,6 +35,7 @@ Cloudflare tunnel are untouched and can keep running side by side.
 | Item | Result |
 | --- | --- |
 | Video | 1920×1080, **61 fps**, H.264 Constrained Baseline |
+| Zero copy | cross-GPU pipeline: AMD VPP → Intel VA-API over dma-buf, **~4% CPU**, 39 ms capture+encode |
 | Path | `UDP · RELAY` through Cloudflare TURN, `relay → relay` pair |
 | Latency | ICE RTT **~39 ms**, frame jitter ~2 ms |
 | First frame | ~0.27 s after the peer connects |
@@ -47,6 +53,68 @@ Reference machine: Debian sid, SwayFX 1.12 (Sway 1.12 base), Intel Core i5-8400
 (UHD 630 / Quick Sync on `/dev/dri/renderD128`), AMD RX 6400
 (`/dev/dri/renderD129`, **no** H.264 encoder), Sway headless output
 `HEADLESS-1` 1920×1080.
+
+## Running it
+
+### Prerequisites
+
+```bash
+sudo apt install wf-recorder pamtester wtype wlrctl
+cd native && cargo build --release
+```
+
+### Secrets
+
+`.secrets/` is git-ignored and mode 700:
+
+| File | Meaning |
+| --- | --- |
+| `host-token` | bearer token the Rust host uses for `/ws/host` and `/api/ice` |
+| `turn-key` | Cloudflare Realtime TURN key id + secret, one per line |
+
+Create the TURN key with:
+
+```bash
+cf realtime turn keys create --name swayrtc   # keep uid + secret
+```
+
+### systemd (user units)
+
+```bash
+systemctl --user enable --now swayrtc-bun.service swayrtc-host.service swayrtc-tunnel.service
+systemctl --user status swayrtc-{bun,host,tunnel}
+journalctl --user -u swayrtc-host -f
+```
+
+`swayrtc-host.service` needs the Wayland environment of the session:
+
+```ini
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WAYLAND_DISPLAY=wayland-1
+Environment=SWAYRTC_CAPTURE_BIN=/path/to/swayrtc/capture-sway.sh
+```
+
+### Cloudflare Tunnel
+
+`~/.cloudflared/swayrtc.yml` publishes `swayrtc.example.com` to
+`http://127.0.0.1:8777` on its own tunnel id. Cloudflare Access is **not** used —
+the application has its own PAM login. Only signaling/UI travel through the
+tunnel; media never does.
+
+## Configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` / `BIND` | `8777` / `127.0.0.1` | Bun listener |
+| `SWAYRTC_ACCOUNT` | `s0u7a` | PAM account, must equal the service user |
+| `SWAYRTC_ALLOWED_ORIGINS` | – | extra accepted `Origin` hosts (comma separated) |
+| `SWAYRTC_DEBUG` | off | verbose signaling / ICE / input tracing |
+| `SWAYRTC_SIGNALING_URL` | `ws://127.0.0.1:8777/ws/host` | host → Bun WS |
+| `SWAYRTC_CAPTURE_BIN` | `capture-sway.sh` | capture command |
+| `SWAYRTC_PUBLIC_IP` | `auto` | extra direct candidates: `auto`, `off`, or an explicit IPv4 |
+| `SWAYRTC_INPUT_BACKEND` | `native` | `legacy` forces wtype/wlrctl |
+| `SWAYRTC_INPUT_RELATIVE` | off | relative instead of absolute pointer motion |
+| `SWAYRTC_PASTE_SHIFT` | off | paste Unicode text with Ctrl+Shift+V (terminals) |
 
 ## Design decisions
 
@@ -172,13 +240,14 @@ delimiter right after the slices. The encoder itself answers in 2-3 ms and the
 capture loop is 16 ms per frame (10 ms compositor copy + 3 ms VPP + 3 ms encode).
 
 ```
-SWAYRTC_ENCODER=zerocopy   # 4% CPU, 39 ms (default)
-SWAYRTC_ENCODER=x264       # 160% CPU, 46 ms
+SWAYRTC_ENCODER=zerocopy   # cross-GPU pipeline: 4% CPU, 39 ms capture+encode
+SWAYRTC_ENCODER=x264       # default: software encode, latency first
 ```
 
 ### Zero copy: the earlier dead end
 
-Cross GPU DMA-BUF was measured, not assumed. Even with the compositor forced
+The working pipeline above is custom code. The stock-tooling route was tried
+first: cross GPU DMA-BUF was measured, not assumed. Even with the compositor forced
 onto the Intel GPU (`WLR_DRM_DEVICES=/dev/dri/card1`) and the headless output
 rendered there, `wl-screenrec --codec avc` still fails with
 
@@ -191,8 +260,9 @@ current pipeline uses, after converting on the CPU). Getting to zero copy would
 need a custom EGL/Vulkan compute pass that writes NV12 into a dma-buf VA-API
 accepts - a research sized change for a few CPU percent.
 
-The realistic wins are elsewhere: hardware encode of the CPU converted frames,
-and the network.
+The shipped pipeline sidesteps exactly this: the colour conversion runs on the
+AMD GPU's VPP instead of Intel's video processor, and the Intel side only
+encodes the NV12 surface it is handed (see *Zero copy: working, as an option*).
 
 ### Renderer: media element by default, WebCodecs optional
 
@@ -256,68 +326,6 @@ Getting closer to a game streaming service needs, in order of impact:
 4. **Shorter frame quantisation** is not available: capture already runs at
    60 fps continuously.
 
-## Running it
-
-### Prerequisites
-
-```bash
-sudo apt install wf-recorder pamtester wtype wlrctl
-cd native && cargo build --release
-```
-
-### Secrets
-
-`.secrets/` is git-ignored and mode 700:
-
-| File | Meaning |
-| --- | --- |
-| `host-token` | bearer token the Rust host uses for `/ws/host` and `/api/ice` |
-| `turn-key` | Cloudflare Realtime TURN key id + secret, one per line |
-
-Create the TURN key with:
-
-```bash
-cf realtime turn keys create --name swayrtc   # keep uid + secret
-```
-
-### systemd (user units)
-
-```bash
-systemctl --user enable --now swayrtc-bun.service swayrtc-host.service swayrtc-tunnel.service
-systemctl --user status swayrtc-{bun,host,tunnel}
-journalctl --user -u swayrtc-host -f
-```
-
-`swayrtc-host.service` needs the Wayland environment of the session:
-
-```ini
-Environment=XDG_RUNTIME_DIR=/run/user/1000
-Environment=WAYLAND_DISPLAY=wayland-1
-Environment=SWAYRTC_CAPTURE_BIN=/home/s0u7a/src/swayrtc/capture-sway.sh
-```
-
-### Cloudflare Tunnel
-
-`~/.cloudflared/swayrtc.yml` publishes `swayrtc.example.com` to
-`http://127.0.0.1:8777` on its own tunnel id. Cloudflare Access is **not** used —
-the application has its own PAM login. Only signaling/UI travel through the
-tunnel; media never does.
-
-## Configuration
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `PORT` / `BIND` | `8777` / `127.0.0.1` | Bun listener |
-| `SWAYRTC_ACCOUNT` | `s0u7a` | PAM account, must equal the service user |
-| `SWAYRTC_ALLOWED_ORIGINS` | – | extra accepted `Origin` hosts (comma separated) |
-| `SWAYRTC_DEBUG` | off | verbose signaling / ICE / input tracing |
-| `SWAYRTC_SIGNALING_URL` | `ws://127.0.0.1:8777/ws/host` | host → Bun WS |
-| `SWAYRTC_CAPTURE_BIN` | `capture-sway.sh` | capture command |
-| `SWAYRTC_PUBLIC_IP` | `auto` | extra direct candidates: `auto`, `off`, or an explicit IPv4 |
-| `SWAYRTC_INPUT_BACKEND` | `native` | `legacy` forces wtype/wlrctl |
-| `SWAYRTC_INPUT_RELATIVE` | off | relative instead of absolute pointer motion |
-| `SWAYRTC_PASTE_SHIFT` | off | paste Unicode text with Ctrl+Shift+V (terminals) |
-
 ## Testing
 
 All test tooling runs against isolated instances on their own port and a
@@ -352,9 +360,8 @@ its tunnel) are stopped and disabled; nothing in this repository depends on them
 * Media goes through Cloudflare TURN by default: expect one extra network hop and
   relay bandwidth accounting. Switch `PATH POLICY` to `Auto` on networks where
   direct UDP is possible.
-* Zero copy capture is not implemented (see above).
-* Encoding is software x264, not Quick Sync (see above). CPU cost is ~1 core at
-  1080p60.
+* The default encoder is software x264 (~160% CPU at 1080p60). The VA-API and
+  zero-copy paths cut CPU sharply but add encode latency (see above).
 * The headless output can stop repainting after long idle periods, leaving stale
   content in the captured buffer. Continuous capture (`-D`) and a `swaybg`
   restart both force a full repaint.
@@ -366,8 +373,9 @@ server.ts              Bun: PAM auth, sessions, /api/ice, WSS signaling, static 
 web/                   UI (no build step, no external CDN, strict CSP)
 native/src/main.rs     WebRTC host, capture supervision, peer lifecycle
 native/src/input.rs    Wayland virtual keyboard / pointer
+native/gpu/            cross-GPU zero-copy capture (C; dma-buf: AMD VPP → Intel VA-API)
 native/protocols/      vendored protocol XML for offline builds
-capture-sway.sh        wf-recorder → QSV h264_vaapi (x264 fallback)
+capture-sway.sh        capture entry point: native client first, wf-recorder fallback
 mock-capture.sh        synthetic 60 fps source for throughput tests
 tools/                 test environment, E2E, auth regression suites
 ```
