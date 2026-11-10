@@ -531,8 +531,12 @@ impl Drop for CaptureKiller {
 }
 
 fn spawn_capture() -> Result<(String, tokio::process::Child)> {
-    let bin = std::env::var("SWAYRTC_CAPTURE_BIN")
-        .unwrap_or_else(|_| "/home/s0u7a/.local/bin/wl-screenrec".into());
+    let bin = std::env::var("SWAYRTC_CAPTURE_BIN").unwrap_or_else(|_| {
+        match std::env::var("HOME") {
+            Ok(home) => format!("{home}/.local/bin/wl-screenrec"),
+            Err(_) => "wl-screenrec".into(),
+        }
+    });
     let wayland = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-1".into());
     let dri = std::env::var("SWAYRTC_VA_DEVICE").unwrap_or_else(|_| "/dev/dri/renderD128".into());
     let mut cmd = Command::new(&bin);

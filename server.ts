@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 
 /*
@@ -7,7 +8,7 @@ import { join } from "node:path";
  * ------------------------
  * - Authentication: PAM via `pamtester login <ACCOUNT> authenticate`, password on stdin.
  *   pam_unix authenticates only the account the process itself runs as, so the
- *   service MUST run as ACCOUNT (production: user s0u7a). Never run as root.
+ *   service MUST run as ACCOUNT. Never run as root.
  * - Sessions: 32-byte crypto-random key, HttpOnly/SameSite=Strict cookie, 12h TTL.
  * - Never logs, returns, or forwards the password, and never exposes pamtester output.
  */
@@ -25,7 +26,7 @@ const ROOT = import.meta.dir;
 const WEB_ROOT = join(ROOT, "web");
 const PORT = Number(process.env.PORT || 8777);
 const BIND = process.env.BIND || "127.0.0.1";
-const ACCOUNT = (process.env.SWAYRTC_ACCOUNT || "s0u7a").trim();
+const ACCOUNT = (process.env.SWAYRTC_ACCOUNT || userInfo().username).trim();
 const DEBUG = process.env.SWAYRTC_DEBUG === "1";
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;

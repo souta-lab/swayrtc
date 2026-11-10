@@ -16,10 +16,10 @@ if [ -z "$TEST_PASSWORD" ]; then
   echo "error: TEST_PASSWORD is not set and .secrets/test-password was not found" >&2
   exit 1
 fi
-PROJ=/home/s0u7a/src/swayrtc
+PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIR="/tmp/swayrtc-test-$PORT"
 TESTUSER=swayrtctest
-BUN=/home/s0u7a/.bun/bin/bun
+BUN="${BUN:-$HOME/.bun/bin/bun}"
 
 kill_tree() {
   local p=$1
@@ -81,8 +81,8 @@ start_env() {
   echo $! > "$DIR/bun.pid"
   sleep 1
   env SWAYRTC_SIGNALING_URL="ws://127.0.0.1:$PORT/ws/host" SWAYRTC_DEBUG=1 \
-      XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY="${TEST_WAYLAND_DISPLAY:-$(/home/s0u7a/src/swayrtc/tools/resolve-session.sh 2>/dev/null | cut -d" " -f1)}" \
-      SWAYRTC_OUTPUT="${TEST_OUTPUT:-$(/home/s0u7a/src/swayrtc/tools/resolve-session.sh 2>/dev/null | cut -d" " -f2)}" \
+      XDG_RUNTIME_DIR="/run/user/$(id -u)" WAYLAND_DISPLAY="${TEST_WAYLAND_DISPLAY:-$("$PROJ/tools/resolve-session.sh" 2>/dev/null | cut -d" " -f1)}" \
+      SWAYRTC_OUTPUT="${TEST_OUTPUT:-$("$PROJ/tools/resolve-session.sh" 2>/dev/null | cut -d" " -f2)}" \
       SWAYRTC_CAPTURE_BIN="${SWAYRTC_CAPTURE_BIN:-$PROJ/capture-sway.sh}" \
       "$PROJ/native/target/release/swayrtc-host" >"$DIR/host.log" 2>&1 &
   echo $! > "$DIR/host.pid"

@@ -10,7 +10,8 @@ const USER = "swayrtctest";
 const PASS = process.env.USER_PASS;
 if (!PASS) { console.error("USER_PASS is not set (test account password: see .secrets/test-password)"); process.exit(1); }
 const ROUNDS = Number(process.env.ROUNDS ?? 8);
-const WALL = process.env.WALL ?? "/home/s0u7a/ダウンロード/copland_os_lain_by_phate1128_dxxpea.jpg";
+const WALL = process.env.WALL;
+if (!WALL) { console.error("WALL is not set (path to the test wallpaper image)"); process.exit(1); }
 
 const browser = await chromium.launch({
   executablePath: "/usr/bin/google-chrome",
