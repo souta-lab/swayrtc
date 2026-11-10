@@ -1,4 +1,16 @@
-# SwayRTC
+<p align="center">
+  <img src="docs/logo.png" width="140" alt="SwayRTC logo">
+</p>
+
+<h1 align="center">SwayRTC</h1>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/runtime-Bun-black?logo=bun" alt="Runtime: Bun">
+  <img src="https://img.shields.io/badge/host-Rust-orange?logo=rust" alt="Host: Rust">
+  <img src="https://img.shields.io/badge/compositor-Sway%20%2F%20Wayland-blue" alt="Compositor: Sway / Wayland">
+  <img src="https://img.shields.io/badge/media-WebRTC%20%2F%20H.264-purple" alt="Media: WebRTC / H.264">
+</p>
 
 Ultra low latency browser remote desktop for Sway: a minimal Bun server for
 authentication + WebRTC signaling + UI, and a native Rust host that captures a
@@ -11,6 +23,17 @@ Intel GPU encodes it with VA-API, and no pixel ever touches the CPU
 (~4% CPU at 1080p60; see *Zero copy: working, as an option* below).
 
 Replaces the WayVNC + noVNC stack (see *Relationship to WayVNC / noVNC*).
+
+## 📑 Contents
+
+- [📊 What works](#what-works)
+- [🚀 Running it](#running-it)
+- [⚙️ Configuration](#configuration)
+- [🧠 Design decisions](#design-decisions)
+- [🧪 Testing](#testing)
+- [🔁 Relationship to WayVNC / noVNC](#wayvnc)
+- [⚠️ Known limitations](#known-limitations)
+- [🗂️ Layout](#layout)
 
 ```
  browser (HTTPS/WSS)                    host (same machine, runs as the service user)
@@ -30,7 +53,8 @@ Replaces the WayVNC + noVNC stack (see *Relationship to WayVNC / noVNC*).
                                      └──────────────────────────────────────┘
 ```
 
-## What works (measured on the reference machine)
+<a name="what-works"></a>
+## 📊 What works (measured on the reference machine)
 
 | Item | Result |
 | --- | --- |
@@ -54,7 +78,8 @@ Reference machine: Debian sid, SwayFX 1.12 (Sway 1.12 base), Intel Core i5-8400
 (`/dev/dri/renderD129`, **no** H.264 encoder), Sway headless output
 `HEADLESS-1` 1920×1080.
 
-## Running it
+<a name="running-it"></a>
+## 🚀 Running it
 
 ### Prerequisites
 
@@ -101,12 +126,13 @@ Environment=SWAYRTC_CAPTURE_BIN=/path/to/swayrtc/capture-sway.sh
 the application has its own PAM login. Only signaling/UI travel through the
 tunnel; media never does.
 
-## Configuration
+<a name="configuration"></a>
+## ⚙️ Configuration
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORT` / `BIND` | `8777` / `127.0.0.1` | Bun listener |
-| `SWAYRTC_ACCOUNT` | `s0u7a` | PAM account, must equal the service user |
+| `SWAYRTC_ACCOUNT` | *(the server's OS user)* | PAM account; the server can only authenticate the user it runs as, so the default is that user |
 | `SWAYRTC_ALLOWED_ORIGINS` | – | extra accepted `Origin` hosts (comma separated) |
 | `SWAYRTC_DEBUG` | off | verbose signaling / ICE / input tracing |
 | `SWAYRTC_SIGNALING_URL` | `ws://127.0.0.1:8777/ws/host` | host → Bun WS |
@@ -116,7 +142,8 @@ tunnel; media never does.
 | `SWAYRTC_INPUT_RELATIVE` | off | relative instead of absolute pointer motion |
 | `SWAYRTC_PASTE_SHIFT` | off | paste Unicode text with Ctrl+Shift+V (terminals) |
 
-## Design decisions
+<a name="design-decisions"></a>
+## 🧠 Design decisions
 
 ### Media path: TURN is the default
 
@@ -326,7 +353,8 @@ Getting closer to a game streaming service needs, in order of impact:
 4. **Shorter frame quantisation** is not available: capture already runs at
    60 fps continuously.
 
-## Testing
+<a name="testing"></a>
+## 🧪 Testing
 
 All test tooling runs against isolated instances on their own port and a
 throwaway Linux user (`swayrtctest`); production is never touched.
@@ -346,12 +374,14 @@ recovery, the mobile layout, JS errors and capture child cleanup.
 `tools/authcheck.sh` is the authentication regression suite (74 curl checks:
 wrong password, rate limit, CSRF, traversal, session rotation, tunnel headers).
 
-## Relationship to WayVNC / noVNC
+<a name="wayvnc"></a>
+## 🔁 Relationship to WayVNC / noVNC
 
 This replaces them. The old `browser-vnc-*` units (wayvnc, websockify, nginx and
 its tunnel) are stopped and disabled; nothing in this repository depends on them.
 
-## Known limitations
+<a name="known-limitations"></a>
+## ⚠️ Known limitations
 
 * One viewer at a time; a second viewer takes over the session.
 * Text injection goes through `wtype` and follows the host keyboard layout —
@@ -366,7 +396,8 @@ its tunnel) are stopped and disabled; nothing in this repository depends on them
   content in the captured buffer. Continuous capture (`-D`) and a `swaybg`
   restart both force a full repaint.
 
-## Layout
+<a name="layout"></a>
+## 🗂️ Layout
 
 ```
 server.ts              Bun: PAM auth, sessions, /api/ice, WSS signaling, static UI
