@@ -224,3 +224,30 @@ existing project it was compared against in the README):
 - **Multi-output capture and per-output plans.** One output, one plan.
 - **Replacing PAM authentication or the signaling design.** They are not
   machine-specific in the way the capture pipeline is.
+
+## 6. Status addendum (2026-11-10, phase 2)
+
+Phase 2 is implemented on branch `feat/planner-integration`:
+
+- The probe/planner lives in the shared module `native/src/caps.rs`
+  (crate lib target), used by both `swayrtc-probe` and `swayrtc-capture`.
+  `swayrtc-probe` additionally prints the plan machine-readably
+  (`--format env` / `--format json`).
+- `swayrtc-capture` with `SWAYRTC_ENCODER` unset/`auto` consults the
+  planner for the CPU strategies; `capture-sway.sh` in auto mode reads
+  the probe plan and takes the zero-copy C path only for zero-copy
+  plans, exporting the plan device roles
+  (`SWAYRTC_ZEROCOPY_CAPTURE_DEVICE` / `SWAYRTC_ZEROCOPY_ENCODE_DEVICE`,
+  now honoured by the C pipeline). Auto-chosen VA-API pipelines are
+  gated by a one-frame startup validation and fall back to x264 with
+  the reason logged.
+- **Capture has a new home: [zerocap](https://github.com/souta-lab/zerocap)**
+  (public). The split project is wlroots-generic rather than
+  Sway-specific — registry-based output enumeration, `ZEROCAP_*`
+  environment, `zerocap` / `zerocap-probe` binaries — and contains the
+  capture bin, the probe, the caps module and the `gpu/` zero-copy
+  pipeline with the CLI of §3.
+- The in-tree capture code remains in place and production wiring is
+  unchanged: `SWAYRTC_CAPTURE_BIN` is the seam through which the host
+  can later point at a zerocap build. Removing the in-tree copy is
+  phase 3, to be done only after such a switch is proven in production.
