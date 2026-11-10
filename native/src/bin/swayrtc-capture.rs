@@ -11,6 +11,9 @@
 //! directly on our stdout where the host's capture manager already reads it.
 //! The encoder is chosen the same way as before (VA-API when it opens, x264
 //! otherwise) and every knob stays behind the same environment variables.
+//! Since the generalization work (DESIGN.md §2), SWAYRTC_ENCODER unset or
+//! "auto" asks the shared capability planner which VA device to try first;
+//! explicit x264/qsv keep the pre-planner behaviour exactly.
 
 use anyhow::{bail, Context, Result};
 use std::io::Write;
@@ -334,22 +337,13 @@ fn to_nv12(pixels: &[u8], width: usize, height: usize, stride: usize, swap_rb: b
 // Encoder
 // ---------------------------------------------------------------------------
 
-fn encoder_command(width: u32, height: u32) -> (Command, &'static str) {
-    let fps = std::env::var("SWAYRTC_FPS").unwrap_or_else(|_| "60".into());
-    let bitrate = std::env::var("SWAYRTC_BITRATE").unwrap_or_else(|_| "6M".into());
-    let qp = std::env::var("SWAYRTC_QP").unwrap_or_else(|_| "24".into());
-    let gop = std::env::var("SWAYRTC_GOP").unwrap_or_else(|_| fps.clone());
-    let va_device = std::env::var("SWAYRTC_VA_DEVICE").unwrap_or_else(|_| "/dev/dri/renderD128".into());
-    // Measured capture+encode latency on this host: x264 21 ms (7 ms floor),
-    // VA-API 82 ms. The Intel LP encoder keeps too many frames in flight at
-    // 60 fps, so latency wins as the default; SWAYRTC_ENCODER=qsv trades ~60 ms
-    // of latency for roughly half the CPU.
-    let force = std::env::var("SWAYRTC_ENCODER").unwrap_or_else(|_| "x264".into());
-    let size = format!("{width}x{height}");
-    let fps_arg = fps.clone();
-
-    let vaapi_ok = force != "x264" && force != "auto"
-        && std::path::Path::new(&va_device).exists()
+/// One-frame VA-API smoke test on a device. An advertised entrypoint is a
+/// hypothesis, not a proof (DESIGN.md §2.1), so a device counts as usable
+/// only once ffmpeg has actually opened h264_vaapi on it and encoded a
+/// frame. This is the startup validation every VA attempt goes through;
+/// failing it walks the plan down its fallback chain instead of dying.
+fn vaapi_works(va_device: &str) -> bool {
+    std::path::Path::new(va_device).exists()
         && Command::new("ffmpeg")
             .args([
                 "-nostdin", "-hide_banner", "-loglevel", "error",
@@ -362,7 +356,83 @@ fn encoder_command(width: u32, height: u32) -> (Command, &'static str) {
             .stderr(Stdio::null())
             .status()
             .map(|s| s.success())
-            .unwrap_or(false);
+            .unwrap_or(false)
+}
+
+/// Planner consultation for SWAYRTC_ENCODER unset / "auto" (DESIGN.md §2.4).
+/// Returns the VA device to attempt, or None for software encoding. This
+/// binary only executes the CPU-side strategies — a zero-copy plan is run
+/// by the C pipeline via capture-sway.sh; here it maps to CPU convert +
+/// VA-API encode on the plan's encode device. Never panics: any probe
+/// failure degrades to the software strategy with the reason logged.
+fn auto_va_device() -> Option<String> {
+    use swayrtc_host::caps;
+    let devs = caps::enumerate_devices();
+    if devs.is_empty() {
+        eprintln!("swayrtc-capture: auto: no render nodes found; plan: cpu-convert + x264");
+        return None;
+    }
+    let (idx, why) = caps::pick_capture_device(&devs);
+    let plan = caps::plan(&devs, idx);
+    eprintln!("swayrtc-capture: auto: capture source {} — {why}", devs[idx].short());
+    eprintln!("swayrtc-capture: auto: plan: {}", plan.strategy.name());
+    for line in &plan.lines {
+        eprintln!("swayrtc-capture: auto:   {line}");
+    }
+    for note in &plan.notes {
+        eprintln!("swayrtc-capture: auto:   note: {note}");
+    }
+    if !plan.fallback.is_empty() {
+        let names: Vec<&str> = plan.fallback.iter().map(|s| s.name()).collect();
+        eprintln!("swayrtc-capture: auto:   fallback chain: {}", names.join(" -> "));
+    }
+    match &plan.encode {
+        caps::EncodeLoc::Vaapi { node, .. } => Some(
+            // An explicit SWAYRTC_VA_DEVICE still wins over the plan.
+            std::env::var("SWAYRTC_VA_DEVICE")
+                .unwrap_or_else(|_| node.to_string_lossy().into_owned()),
+        ),
+        caps::EncodeLoc::X264 => None,
+    }
+}
+
+fn encoder_command(width: u32, height: u32) -> (Command, &'static str) {
+    let fps = std::env::var("SWAYRTC_FPS").unwrap_or_else(|_| "60".into());
+    let bitrate = std::env::var("SWAYRTC_BITRATE").unwrap_or_else(|_| "6M".into());
+    let qp = std::env::var("SWAYRTC_QP").unwrap_or_else(|_| "24".into());
+    let gop = std::env::var("SWAYRTC_GOP").unwrap_or_else(|_| fps.clone());
+    // Measured capture+encode latency on this host: x264 21 ms (7 ms floor),
+    // VA-API 82 ms. The Intel LP encoder keeps too many frames in flight at
+    // 60 fps, so latency wins as the default; SWAYRTC_ENCODER=qsv trades ~60 ms
+    // of latency for roughly half the CPU.
+    let force = std::env::var("SWAYRTC_ENCODER").unwrap_or_else(|_| "auto".into());
+    let size = format!("{width}x{height}");
+    let fps_arg = fps.clone();
+
+    // Decide whether to attempt VA-API, and on which device.
+    // - "x264": never (exactly the pre-planner behaviour).
+    // - unset / "auto": the planner decides (DESIGN.md §2.4); the attempt is
+    //   still gated by the one-frame smoke test below, and a failure walks
+    //   down to x264 with the reason logged.
+    // - anything else ("qsv", "zerocopy", ...): VA-API on SWAYRTC_VA_DEVICE
+    //   (default renderD128), as before planner wiring.
+    let attempt_va: Option<String> = match force.as_str() {
+        "x264" => None,
+        "auto" => auto_va_device(),
+        _ => Some(
+            std::env::var("SWAYRTC_VA_DEVICE")
+                .unwrap_or_else(|_| "/dev/dri/renderD128".into()),
+        ),
+    };
+    let vaapi_ok = attempt_va.as_deref().map(vaapi_works).unwrap_or(false);
+    if let Some(dev) = &attempt_va {
+        if !vaapi_ok {
+            eprintln!(
+                "swayrtc-capture: VA-API startup validation failed on {dev}; falling back to x264"
+            );
+        }
+    }
+    let va_device = attempt_va.unwrap_or_default();
 
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-nostdin", "-y", "-hide_banner", "-loglevel", "error"]);
