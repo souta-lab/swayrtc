@@ -1,0 +1,179 @@
+/* SwayRTC sign-in screen. Palette matches web/style.css. */
+:root {
+  --bg: #0a0d14;
+  --field: #0f1420;
+  --line: #333d51;
+  --line-hover: #414c63;
+  --text: #e8edf5;
+  --muted: #8a93a7;
+  --label: #aeb7c9;
+  --accent: #a4b7ff;
+  --accent-hover: #c2ceff;
+  --ink: #101b36;
+  --danger: #ff9d9d;
+  --radius: 10px;
+  color-scheme: dark;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+* { box-sizing: border-box; }
+
+html { min-height: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 24px;
+  color: var(--text);
+  background:
+    radial-gradient(ellipse 58% 38% at 50% 26%, #1b2335, transparent 70%),
+    var(--bg);
+}
+
+.login { width: min(384px, 100%); }
+
+.symbol {
+  font-size: 40px;
+  line-height: 1;
+  color: #89a6ff;
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  display: block;
+  font-size: 11px;
+  letter-spacing: .2em;
+  color: var(--muted);
+}
+
+h1 {
+  margin: 10px 0 0;
+  font-size: 40px;
+  font-weight: 640;
+  line-height: 1.05;
+  letter-spacing: -.05em;
+}
+
+h1 span { color: #8aa6ff; }
+
+.lede {
+  margin: 12px 0 36px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+form { display: grid; gap: 16px; }
+
+.field { display: grid; gap: 7px; }
+
+label {
+  font-size: 12px;
+  letter-spacing: .04em;
+  color: var(--label);
+}
+
+input {
+  width: 100%;
+  height: 50px;
+  padding: 0 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* >=16px stops iOS Safari from zooming on focus */
+  outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+input::placeholder { color: #5d6a83; }
+input:hover { border-color: var(--line-hover); }
+
+input:focus-visible {
+  border-color: #829af9;
+  box-shadow: 0 0 0 3px #89a6ff26;
+}
+
+/* Keep Chrome's autofill background consistent with the dark theme. */
+input:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px var(--field) inset;
+}
+
+input:-webkit-autofill:focus-visible {
+  -webkit-box-shadow: 0 0 0 1000px var(--field) inset, 0 0 0 3px #89a6ff26;
+}
+
+button {
+  margin-top: 6px;
+  height: 50px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  cursor: pointer;
+  transition: background .15s ease, opacity .15s ease;
+}
+
+button:hover { background: var(--accent-hover); }
+button:active { transform: translateY(1px); }
+
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px #0a0d14, 0 0 0 6px #89a6ff66;
+}
+
+button:disabled {
+  opacity: .6;
+  cursor: progress;
+}
+
+button .arrow { font-weight: 400; }
+
+output {
+  display: block;
+  min-height: 22px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--danger);
+}
+
+footer {
+  margin-top: 56px;
+  font-size: 11px;
+  color: #626e86;
+}
+
+.noscript {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--danger);
+  text-align: center;
+}
+
+@media (max-width: 420px) {
+  body { padding: 24px 20px; }
+  .symbol { font-size: 34px; margin-bottom: 18px; }
+  h1 { font-size: 34px; }
+  .lede { margin-bottom: 30px; }
+  input, button { height: 52px; } /* comfortable touch targets */
+  footer { margin-top: 40px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input, button { transition: none; }
+  button:active { transform: none; }
+}

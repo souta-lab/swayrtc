@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex,nofollow">
+<title>SwayRTC · Sign in</title>
+<link rel="stylesheet" href="/web/login.css">
+</head>
+<body>
+<main class="login">
+  <div class="symbol" aria-hidden="true">◈</div>
+  <span class="eyebrow">PRIVATE DESKTOP</span>
+  <h1>Sway<span>RTC</span></h1>
+  <p class="lede">Direct pixels. No middleman.</p>
+  <form id="login" autocomplete="on" novalidate>
+    <div class="field">
+      <label for="username">PC username</label>
+      <input id="username" name="username" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" value="s0u7a" required>
+    </div>
+    <div class="field">
+      <label for="pass">PC login password</label>
+      <input id="pass" name="password" type="password" autocomplete="current-password" required autofocus>
+    </div>
+    <button id="submit" type="submit">
+      <span class="label">Connect to desktop</span>
+      <span class="arrow" aria-hidden="true">↗</span>
+    </button>
+    <output id="error" role="alert" aria-live="polite"></output>
+  </form>
+  <footer>Authenticated signaling · Encrypted P2P media</footer>
+</main>
+<noscript><p class="noscript">JavaScript is required to sign in.</p></noscript>
+<script src="/web/login.js"></script>
+</body>
+</html>

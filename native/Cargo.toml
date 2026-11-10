@@ -1,0 +1,22 @@
+[package]
+name = "swayrtc-host"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+futures-util = "0.3"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+webrtc = "0.12"
+# Native Wayland input injection (virtual keyboard / virtual pointer).
+# These are pure-Rust bindings: no libwayland / libxkbcommon link dependency.
+wayland-client = "0.31.15"
+wayland-scanner = "0.31.11"
+wayland-backend = "0.3.15"
+# Screen capture through wlr-screencopy (separate binary, see src/bin/).
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+libc = "0.2"

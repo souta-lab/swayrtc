@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0d13">
+<title>SwayRTC</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.6 21.4 12 12 21.4 2.6 12Z' fill='none' stroke='%238fa8ff' stroke-width='1.6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" focusable="false" width="0" height="0">
+  <symbol id="i-mark" viewBox="0 0 24 24"><path d="M12 2.6 21.4 12 12 21.4 2.6 12Z"/><path d="M12 7.6 16.4 12 12 16.4 7.6 12Z"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="1.5"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 13.5h.01M18 13.5h.01M9 14h6"/></symbol>
+  <symbol id="i-reconnect" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5"/></symbol>
+  <symbol id="i-signout" viewBox="0 0 24 24"><path d="M15 4h4.5v16H15M10.5 8 6.5 12l4 4M6.5 12h9"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-stats" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9.5 12 15.5 18 9.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="9.5" rx="1.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14v2.2"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" aria-hidden="true"><use href="#i-mark"/></svg>
+    <h1 class="brand-name">Sway<b>RTC</b></h1>
+    <span class="brand-tag">ALPHA</span>
+  </div>
+
+  <div class="chips" role="status" aria-live="polite" aria-label="Link state">
+    <span class="chip" id="chip-sig" data-state="idle" title="Signaling socket"><i></i>SIG</span>
+    <span class="chip" id="chip-ice" data-state="idle" title="ICE transport"><i></i>ICE</span>
+    <span class="chip" id="chip-dc" data-state="idle" title="Control DataChannel"><i></i>DC</span>
+    <span class="statusline"><i id="status-led"></i><span id="status">Connecting</span></span>
+  </div>
+
+  <div class="head-actions">
+    <button id="reconnect-top" class="icon-btn" type="button" aria-label="Reconnect now" title="Reconnect">
+      <svg aria-hidden="true"><use href="#i-reconnect"/></svg>
+    </button>
+    <button id="keyboard" class="icon-btn" type="button" aria-label="On-screen keyboard" aria-expanded="false" aria-controls="keyboard-panel" title="On-screen keyboard">
+      <svg aria-hidden="true"><use href="#i-keyboard"/></svg>
+    </button>
+    <button id="lock" class="icon-btn" type="button" aria-label="Full lock mode: capture pointer and keyboard" aria-pressed="false" title="Full lock mode">
+      <svg aria-hidden="true"><use href="#i-lock"/></svg>
+    </button>
+    <button id="fullscreen" class="icon-btn" type="button" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">
+      <svg aria-hidden="true"><use href="#i-expand"/></svg>
+    </button>
+    <button id="logout" class="icon-btn" type="button" aria-label="Sign out" title="Sign out">
+      <svg aria-hidden="true"><use href="#i-signout"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="workspace">
+  <section class="stage" id="stage" aria-label="Remote desktop">
+    <video id="screen" autoplay playsinline muted tabindex="0" aria-label="Remote desktop stream"></video>
+
+    <div class="overlay" id="empty">
+      <div class="overlay-card">
+        <svg class="overlay-mark" aria-hidden="true"><use href="#i-mark"/></svg>
+        <strong id="headline">Waiting for host</strong>
+        <span id="detail">Start the capture agent on the Sway session.</span>
+        <p class="overlay-advice" id="advice" hidden></p>
+        <button id="overlay-action" class="primary" type="button" hidden>Retry now</button>
+      </div>
+    </div>
+
+    <div class="stage-bar" id="stage-bar">
+      <button id="full-keyboard" class="ghost-btn" type="button" aria-label="Toggle on-screen keyboard" title="Keyboard">
+        <svg aria-hidden="true"><use href="#i-keyboard"/></svg>
+      </button>
+      <span class="notice" id="notice" role="status" hidden></span>
+      <button id="lock-stage" class="ghost-btn" type="button" aria-label="Full lock mode: capture pointer and keyboard" aria-pressed="false" title="Full lock mode">
+        <svg aria-hidden="true"><use href="#i-lock"/></svg>
+      </button>
+      <button id="exit-fullscreen" class="ghost-btn" type="button" aria-label="Exit fullscreen" title="Exit fullscreen">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+
+
+    <section class="sheet" id="keyboard-panel" hidden aria-label="On-screen keyboard">
+      <div class="sheet-head">
+        <span class="sheet-title">Remote keyboard</span>
+        <span class="seg" role="group" aria-label="Text input mode">
+          <button type="button" class="seg-btn is-on" id="kb-mode-text" aria-pressed="true">Text</button>
+          <button type="button" class="seg-btn" id="kb-mode-keys" aria-pressed="false">Per key</button>
+        </span>
+        <button id="close-keyboard" class="icon-btn small" type="button" aria-label="Close keyboard panel">
+          <svg aria-hidden="true"><use href="#i-close"/></svg>
+        </button>
+      </div>
+
+      <form id="text-form" autocomplete="off">
+        <label class="sr-only" for="text-input">Text to type on the remote host</label>
+        <input id="text-input" type="text" maxlength="256" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type text for the remote host">
+        <button type="submit" class="primary" id="text-send">Send</button>
+      </form>
+      <p class="sheet-hint" id="kb-mode-hint">Sends the whole line as typed text. Japanese and emoji work here.</p>
+
+      <div class="mods" role="group" aria-label="Modifiers">
+        <button type="button" class="mod" id="mod-ctrl" aria-pressed="false" data-mod="ctrl">Ctrl</button>
+        <button type="button" class="mod" id="mod-alt" aria-pressed="false" data-mod="alt">Alt</button>
+        <button type="button" class="mod" id="mod-shift" aria-pressed="false" data-mod="shift">Shift</button>
+        <button type="button" class="mod" id="mod-super" aria-pressed="false" data-mod="super">Super</button>
+      </div>
+
+      <div class="keys-grid" role="group" aria-label="Special keys">
+        <button type="button" class="key" data-code="Escape" data-key="Escape">Esc</button>
+        <button type="button" class="key" data-code="Tab" data-key="Tab">Tab</button>
+        <button type="button" class="key" data-code="Backspace" data-key="Backspace">⌫</button>
+        <button type="button" class="key" data-code="Delete" data-key="Delete">Del</button>
+        <button type="button" class="key" data-code="Enter" data-key="Enter">⏎</button>
+        <button type="button" class="key" data-code="Space" data-key=" ">Space</button>
+        <button type="button" class="key" data-code="ArrowLeft" data-key="ArrowLeft">←</button>
+        <button type="button" class="key" data-code="ArrowUp" data-key="ArrowUp">↑</button>
+        <button type="button" class="key" data-code="ArrowDown" data-key="ArrowDown">↓</button>
+        <button type="button" class="key" data-code="ArrowRight" data-key="ArrowRight">→</button>
+        <button type="button" class="key" data-code="Home" data-key="Home">Home</button>
+        <button type="button" class="key" data-code="End" data-key="End">End</button>
+        <button type="button" class="key" data-code="PageUp" data-key="PageUp">PgUp</button>
+        <button type="button" class="key" data-code="PageDown" data-key="PageDown">PgDn</button>
+        <button type="button" class="key" data-code="F1" data-key="F1">F1</button>
+        <button type="button" class="key" data-code="F5" data-key="F5">F5</button>
+      </div>
+      <p class="sheet-hint">Tap a modifier, then one key: the modifier clears itself after that key. Hold a key to keep it pressed.</p>
+    </section>
+  </section>
+
+  <div class="hud" id="hud" role="group" aria-label="Session state">
+    <i id="hud-led"></i>
+    <span class="hud-state" id="hud-state" aria-live="polite">Connecting</span>
+    <span class="hud-lock" id="hud-lock" hidden aria-live="polite">LOCKED · Esc to exit</span>
+    <span class="hud-metrics" id="hud-metrics">—</span>
+    <button class="hud-open" id="hud-open" type="button" aria-label="Open session telemetry">
+      <svg aria-hidden="true"><use href="#i-stats"/></svg>
+    </button>
+  </div>
+
+  <div class="keybar" id="keybar" role="toolbar" aria-label="Remote keys">
+    <button type="button" class="key" data-code="Escape" data-key="Escape" aria-label="Escape">Esc</button>
+    <button type="button" class="key" data-code="Tab" data-key="Tab" aria-label="Tab">Tab</button>
+    <button type="button" class="key" data-code="Backspace" data-key="Backspace" aria-label="Backspace">⌫</button>
+    <button type="button" class="key" data-code="Enter" data-key="Enter" aria-label="Enter">⏎</button>
+    <button type="button" class="key" data-code="ArrowLeft" data-key="ArrowLeft" aria-label="Arrow left">←</button>
+    <button type="button" class="key" data-code="ArrowRight" data-key="ArrowRight" aria-label="Arrow right">→</button>
+    <button type="button" class="key wide" id="keybar-keys" aria-label="More keys" aria-expanded="false" aria-controls="keyboard-panel">KEYS</button>
+    <button type="button" class="key wide" id="rail-toggle" aria-label="Session telemetry" aria-expanded="false" aria-controls="rail">STATS</button>
+  </div>
+
+  <aside class="rail" id="rail" aria-label="Session telemetry">
+    <div class="rail-head">
+      <span class="rail-title">Session telemetry</span>
+      <button id="rail-close" class="icon-btn small" type="button" aria-label="Hide telemetry">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+
+    <details class="telemetry" id="telemetry" open>
+      <summary>
+        <span class="sum-label">DETAILS</span>
+        <span class="sum-live" id="sum-live">—</span>
+        <svg class="chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </summary>
+
+      <dl class="rows">
+        <div class="row"><dt>Peer state</dt><dd class="mono" id="peer">—</dd></div>
+        <div class="row"><dt>ICE state</dt><dd class="mono" id="ice">—</dd></div>
+        <div class="row"><dt>Gathering</dt><dd class="mono" id="gathering">—</dd></div>
+        <div class="row"><dt title="Candidates sent by this browser → received from the host">Candidates</dt><dd class="mono" id="candidates">—</dd></div>
+        <div class="row"><dt>Transport</dt><dd class="mono" id="transport">—</dd></div>
+        <div class="row"><dt>Candidate path</dt><dd class="mono" id="path">—</dd></div>
+        <div class="row"><dt>ICE policy</dt><dd class="mono" id="policy">TURN relay</dd></div>
+        <div class="row"><dt>TURN</dt><dd class="mono" id="turn">—</dd></div>
+        <div class="row"><dt>Input mode</dt><dd class="mono" id="input-mode">absolute</dd></div>
+        <div class="row"><dt>Keyboard lock</dt><dd class="mono" id="kblock">off</dd></div>
+      </dl>
+
+      <p class="group-label">STREAM</p>
+      <dl class="rows">
+        <div class="row"><dt>Resolution</dt><dd class="mono" id="resolution">—</dd></div>
+        <div class="row"><dt>Frames / sec</dt><dd class="mono" id="fps">—</dd></div>
+        <div class="row"><dt>Frame jitter</dt><dd class="mono" id="jitter">—</dd></div>
+        <div class="row"><dt>Codec</dt><dd class="mono" id="codec">—</dd></div>
+        <div class="row"><dt>Packet loss</dt><dd class="mono" id="loss">—</dd></div>
+        <div class="row"><dt>Playout hint</dt><dd class="mono" id="playout">—</dd></div>
+      </dl>
+
+      <p class="group-label">LATENCY</p>
+      <dl class="rows">
+        <div class="row"><dt>ICE RTT</dt><dd class="mono" id="rtt">—</dd></div>
+        <div class="row"><dt>Channel RTT</dt><dd class="mono" id="ping">—</dd></div>
+        <div class="row"><dt>Signal RTT</dt><dd class="mono" id="sigrtt">—</dd></div>
+        <div class="row"><dt>Session</dt><dd class="mono" id="uptime">—</dd></div>
+      </dl>
+    </details>
+
+    <details class="advanced" id="advanced">
+      <summary>
+        <span class="sum-label">PATH POLICY</span>
+        <span class="sum-live" id="policy-live">TURN relay</span>
+        <svg class="chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </summary>
+      <div class="policy-row" role="group" aria-label="ICE path policy">
+        <button type="button" class="seg-btn is-on" data-policy="relay" aria-pressed="true">TURN relay</button>
+        <button type="button" class="seg-btn" data-policy="all" aria-pressed="false">Auto</button>
+        <button type="button" class="seg-btn" data-policy="direct" aria-pressed="false">Direct only</button>
+      </div>
+      <p class="fine" id="policy-note">Media always flows through Cloudflare TURN. DTLS-SRTP stays end to end; direct UDP is an advanced option.</p>
+      <div class="policy-row" role="group" aria-label="Renderer" style="margin-top:14px">
+        <button type="button" class="seg-btn is-on" data-render="element" aria-pressed="true">Renderer: video</button>
+        <button type="button" class="seg-btn" data-render="webcodecs" aria-pressed="false">WebCodecs</button>
+      </div>
+      <p class="fine" id="render-note">WebCodecs decodes the RTP stream directly and paints it on a canvas, skipping the media element's presentation queue. Experimental; switch back if the picture stops.</p>
+    </details>
+
+    <div class="rail-actions">
+      <button id="reconnect" class="primary wide-btn" type="button">
+        <svg aria-hidden="true"><use href="#i-reconnect"/></svg>Reconnect
+      </button>
+      <label class="switch-row" for="control">
+        <input id="control" type="checkbox" checked>
+        <span>
+          <span class="switch-title">Send remote input</span>
+          <span class="switch-hint">Keyboard, pointer and touch are forwarded to the host.</span>
+        </span>
+      </label>
+      <p class="fine">Signaling over HTTPS. Media is relayed by Cloudflare TURN; DTLS-SRTP stays end to end. Direct UDP is available as an advanced option.</p>
+    </div>
+  </aside>
+</main>
+
+<footer class="statusbar">
+  <span class="foot-left">H.264 · SWAY / WAYLAND</span>
+  <span class="foot-right" id="footer-state">Signaling offline</span>
+</footer>
+
+<script src="/web/app.js"></script>
+</body>
+</html>
