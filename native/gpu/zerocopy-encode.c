@@ -258,8 +258,14 @@ int main(int argc, char **argv) {
     int gop = getenv("SWAYRTC_GOP") ? atoi(getenv("SWAYRTC_GOP")) : 60;
     int kbps = getenv("SWAYRTC_BITRATE_KBPS") ? atoi(getenv("SWAYRTC_BITRATE_KBPS")) : 6000;
 
-    amd_dpy = open_va("/dev/dri/renderD129", &amd_fd);
-    intel_dpy = open_va("/dev/dri/renderD128", &intel_fd);
+    // Device roles are parameters since the generalization work
+    // (DESIGN.md section 2): the capture/convert device is the one whose
+    // VPP converts (the compositor renders there), the encode device owns
+    // the H.264 encoder. Defaults are the reference machine's pair.
+    const char *cap_node = getenv("SWAYRTC_ZEROCOPY_CAPTURE_DEVICE");
+    const char *enc_node = getenv("SWAYRTC_ZEROCOPY_ENCODE_DEVICE");
+    amd_dpy = open_va(cap_node ? cap_node : "/dev/dri/renderD129", &amd_fd);
+    intel_dpy = open_va(enc_node ? enc_node : "/dev/dri/renderD128", &intel_fd);
     if (!amd_dpy || !intel_dpy) die("cannot open both VA displays");
     intel_gbm = gbm_create_device(intel_fd);
     if (!intel_gbm) die("gbm_create_device failed");
