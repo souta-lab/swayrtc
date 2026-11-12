@@ -29,7 +29,11 @@
 #   SWAYRTC_QP / SWAYRTC_GOP          -> ZEROCAP_QP / ZEROCAP_GOP
 #   SWAYRTC_BITRATE (e.g. 6M, 800k)   -> ZEROCAP_BITRATE (as is, CPU path)
 #                                        ZEROCAP_BITRATE_KBPS (integer kbps)
-#   SWAYRTC_BITRATE_KBPS              -> ZEROCAP_BITRATE_KBPS (beats the above)
+#   SWAYRTC_BITRATE_KBPS              -> ZEROCAP_BITRATE_KBPS
+#     Bitrate pair precedence: explicit ZEROCAP_BITRATE_KBPS wins outright;
+#     otherwise derive kbps from explicit ZEROCAP_BITRATE, then prefer
+#     SWAYRTC_BITRATE_KBPS, then derive from SWAYRTC_BITRATE. The CPU string
+#     still passes through from SWAYRTC_BITRATE unless explicitly overridden.
 #   SWAYRTC_ZEROCOPY_CAPTURE_DEVICE   -> ZEROCAP_ZEROCOPY_CAPTURE_DEVICE
 #   SWAYRTC_ZEROCOPY_ENCODE_DEVICE    -> ZEROCAP_ZEROCOPY_ENCODE_DEVICE
 #   SWAYRTC_CAPTURE_DEVICE, SWAYRTC_RC, SWAYRTC_VBV, SWAYRTC_TIMING,
@@ -50,11 +54,11 @@ die() {
 
 # --- locate zerocap -----------------------------------------------------------
 if [ -n "${ZEROCAP_BIN:-}" ]; then
-  [ -x "$ZEROCAP_BIN" ] || die "ZEROCAP_BIN=$ZEROCAP_BIN is not an executable file"
+  [ -f "$ZEROCAP_BIN" ] && [ -x "$ZEROCAP_BIN" ] || die "ZEROCAP_BIN=$ZEROCAP_BIN is not an executable file"
   ZEROCAP="$ZEROCAP_BIN"
 elif ZEROCAP="$(command -v zerocap 2>/dev/null)" && [ -n "$ZEROCAP" ]; then
   :
-elif [ -x "$HOME/.local/bin/zerocap" ]; then
+elif [ -f "$HOME/.local/bin/zerocap" ] && [ -x "$HOME/.local/bin/zerocap" ]; then
   ZEROCAP="$HOME/.local/bin/zerocap"
 else
   die "zerocap is required but was not found (checked \$ZEROCAP_BIN, PATH, \$HOME/.local/bin/zerocap).
@@ -73,21 +77,27 @@ set_from() {
   export "$name=$value"
 }
 
-# "6M" -> 6000, "800k" -> 800, "2.5M" -> 2500, "6000000" (bit/s) -> 6000.
-# Prints nothing for a value it cannot parse.
+# FFmpeg's case-sensitive SI / binary suffixes, rounded to integer kbps.
+# Prints nothing for unsupported values or results below 1 kbps.
 bitrate_kbps() {
   local v="$1"
-  [[ "$v" =~ ^([0-9]+(\.[0-9]+)?)([kKmM]?)$ ]] || return 0
+  [[ "$v" =~ ^([0-9]+(\.[0-9]+)?)([kKMG]|[KMG]i)?$ ]] || return 0
   awk -v n="${BASH_REMATCH[1]}" -v u="${BASH_REMATCH[3]}" 'BEGIN {
-    m = (u == "k" || u == "K") ? 1 : (u == "m" || u == "M") ? 1000 : 0.001
-    printf "%d\n", n * m + 0.5
+    m = 0.001
+    if (u == "k" || u == "K") m = 1
+    else if (u == "M") m = 1000
+    else if (u == "G") m = 1000000
+    else if (u == "Ki") m = 1024 / 1000
+    else if (u == "Mi") m = 1024 * 1024 / 1000
+    else if (u == "Gi") m = 1024 * 1024 * 1024 / 1000
+    rounded = int(n * m + 0.5)
+    if (rounded >= 1) printf "%.0f\n", rounded
   }'
 }
 
-# Operator-explicit ZEROCAP_BITRATE_KBPS must beat SWAYRTC_BITRATE_KBPS, which
-# must beat the value derived from SWAYRTC_BITRATE; remember which was explicit
-# before anything is exported.
+# Remember explicit settings, including empty values, before translation.
 explicit_kbps="${ZEROCAP_BITRATE_KBPS+x}"
+explicit_bitrate="${ZEROCAP_BITRATE+x}"
 
 set_from ZEROCAP_OUTPUT "${SWAYRTC_OUTPUT:-HEADLESS-1}"
 set_from ZEROCAP_FPS "${SWAYRTC_FPS:-}"
@@ -104,31 +114,59 @@ for knob in CAPTURE_DEVICE RC VBV TIMING CAPTURE_LOG; do
   set_from "ZEROCAP_$knob" "${!src:-}"
 done
 
-if [ -n "${SWAYRTC_BITRATE:-}" ]; then
-  # zerocap's CPU path hands the string to FFmpeg (-maxrate); its zero-copy
-  # pipeline reads an integer kbps. Translate to both.
-  set_from ZEROCAP_BITRATE "$SWAYRTC_BITRATE"
-  kbps="$(bitrate_kbps "$SWAYRTC_BITRATE")"
-  if [ -z "$kbps" ]; then
-    echo "capture-sway: SWAYRTC_BITRATE=$SWAYRTC_BITRATE is not of the form 6M / 800k / 6000000; ZEROCAP_BITRATE_KBPS not set" >&2
-  elif [ -z "$explicit_kbps" ] && [ -z "${SWAYRTC_BITRATE_KBPS:-}" ]; then
-    export ZEROCAP_BITRATE_KBPS="$kbps"
+# Keep the CPU string pass-through independent of the kbps selection.
+set_from ZEROCAP_BITRATE "${SWAYRTC_BITRATE:-}"
+if [ -z "$explicit_kbps" ]; then
+  if [ -z "$explicit_bitrate" ] && [ -n "${SWAYRTC_BITRATE_KBPS:-}" ]; then
+    export ZEROCAP_BITRATE_KBPS="$SWAYRTC_BITRATE_KBPS"
+  elif [ -n "$explicit_bitrate" ] || [ -n "${SWAYRTC_BITRATE:-}" ]; then
+    kbps="$(bitrate_kbps "${ZEROCAP_BITRATE:-}")"
+    if [ -n "$kbps" ]; then
+      export ZEROCAP_BITRATE_KBPS="$kbps"
+    else
+      echo "capture-sway: ZEROCAP_BITRATE=${ZEROCAP_BITRATE:-} cannot be converted to positive integer kbps; ZEROCAP_BITRATE_KBPS not set" >&2
+    fi
   fi
 fi
-[ -z "$explicit_kbps" ] && [ -n "${SWAYRTC_BITRATE_KBPS:-}" ] && export ZEROCAP_BITRATE_KBPS="$SWAYRTC_BITRATE_KBPS"
+
+# Quote one argument for /bin/sh, including embedded quotes and newlines.
+shell_quote() {
+  local value="$1"
+  value="${value//\'/\'\\\'\'}"
+  printf "'%s'" "$value"
+}
 
 # --- run ------------------------------------------------------------------------
+# VA-API needs the render node; the systemd user manager starts without the
+# render group, so re-exec through sg when the device exists but is not
+# accessible. Direct exec keeps this process's PID. sg/newgrp forks and waits,
+# so zerocap runs as its child; teardown there relies on swayrtc-host signalling
+# the whole process group.
+device="${ZEROCAP_VA_DEVICE:-/dev/dri/renderD128}"
+run_command=("$ZEROCAP")
+if [ -e "$device" ] && [ ! -r "$device" ] && command -v sg >/dev/null 2>&1; then
+  run_command=(sg render -c "exec $(shell_quote "$ZEROCAP")")
+fi
+
 if [ "${SWAYRTC_DRY_RUN:-0}" = "1" ]; then
-  echo "capture-sway: dry-run: would exec: $(env | grep '^ZEROCAP_' | sort | tr '\n' ' ')$ZEROCAP" >&2
+  {
+    printf 'capture-sway: dry-run: would exec: '
+    while IFS= read -r name; do
+      case "$name" in
+        ZEROCAP_*)
+          printf '%s=' "$name"
+          shell_quote "${!name}"
+          printf ' '
+          ;;
+      esac
+    done < <(compgen -e | sort)
+    for arg in "${run_command[@]}"; do
+      shell_quote "$arg"
+      printf ' '
+    done
+    printf '\n'
+  } >&2
   exit 0
 fi
 
-# VA-API needs the render node; the systemd user manager starts without the
-# render group, so re-exec through sg when the device exists but is not
-# accessible. exec in both branches keeps this process's pid and process
-# group, which swayrtc-host uses to signal and reap the capture.
-device="${ZEROCAP_VA_DEVICE:-/dev/dri/renderD128}"
-if [ -e "$device" ] && [ ! -r "$device" ] && command -v sg >/dev/null 2>&1; then
-  exec sg render -c "exec $(printf '%q' "$ZEROCAP")"
-fi
-exec "$ZEROCAP"
+exec "${run_command[@]}"
