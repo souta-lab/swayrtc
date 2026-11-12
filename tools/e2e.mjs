@@ -51,7 +51,9 @@ const countCaptures = () => {
       }
       return false;
     };
-    return rows.filter(([pid, , comm]) => (comm === "wl-screenrec" || comm === "ffmpeg") && isDescendant(Number(pid))).length;
+    // comm is truncated to 15 chars: zerocap's zero-copy helper shows as "zerocopy-captur".
+    const CAPTURE_COMMS = new Set(["wl-screenrec", "zerocap", "zerocopy-captur", "ffmpeg"]);
+    return rows.filter(([pid, , comm]) => CAPTURE_COMMS.has(comm) && isDescendant(Number(pid))).length;
   } catch { return -1; }
 };
 

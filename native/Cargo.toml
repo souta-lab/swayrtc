@@ -17,6 +17,5 @@ webrtc = "0.12"
 wayland-client = "0.31.15"
 wayland-scanner = "0.31.11"
 wayland-backend = "0.3.15"
-# Screen capture through wlr-screencopy (separate binary, see src/bin/).
-wayland-protocols-wlr = { version = "0.3", features = ["client"] }
-libc = "0.2"
+# Screen capture is not built here: the host spawns $SWAYRTC_CAPTURE_BIN
+# (capture-sway.sh, which launches the external zerocap binary).

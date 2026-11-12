@@ -16,11 +16,15 @@ Ultra low latency browser remote desktop for Sway: a minimal Bun server for
 authentication + WebRTC signaling + UI, and a native Rust host that captures a
 Sway output and injects real Wayland input.
 
-Capture is a custom wlr-screencopy client with three encode paths: software
-x264 (the default, latency first), VA-API, and a **cross-GPU zero-copy
-pipeline** — the AMD GPU's VPP converts the captured dma-buf to NV12, the
-Intel GPU encodes it with VA-API, and no pixel ever touches the CPU
-(~4% CPU at 1080p60; see *Zero copy: working, as an option* below).
+Capture comes from [zerocap](https://github.com/souta-lab/zerocap), a
+separate project that started life in this repository: a wlr-screencopy
+client with three encode paths — software x264 (latency first), VA-API, and
+a **cross-GPU zero-copy pipeline** where the AMD GPU's VPP converts the
+captured dma-buf to NV12, the Intel GPU encodes it with VA-API, and no pixel
+ever touches the CPU (~4% CPU at 1080p60; see *Zero copy: working, as an
+option* below). A probe/planner picks the path per machine. The host only
+spawns a capture command and reads H.264 from its stdout; `capture-sway.sh`
+is the launcher that runs zerocap.
 
 Replaces the WayVNC + noVNC stack (see *Relationship to WayVNC / noVNC*).
 
@@ -48,7 +52,7 @@ Replaces the WayVNC + noVNC stack (see *Relationship to WayVNC / noVNC*).
  ┌────────────────────────┐          ┌──────────────────────────────────────┐
  │ Cloudflare Realtime    │◀────────▶│ swayrtc-host (Rust)                  │
  │ TURN  turn:…:3478/5349 │          │  · WebRTC peer, H.264 RTP            │
- └────────────────────────┘          │  · capture (wlr-screencopy → H.264)  │
+ └────────────────────────┘          │  · capture child: zerocap → H.264    │
                                      │  · Wayland virtual keyboard/pointer  │
                                      └──────────────────────────────────────┘
 ```
@@ -84,9 +88,24 @@ Reference machine: Debian sid, SwayFX 1.12 (Sway 1.12 base), Intel Core i5-8400
 ### Prerequisites
 
 ```bash
-sudo apt install wf-recorder pamtester wtype wlrctl
+sudo apt install pamtester wtype wlrctl ffmpeg
 cd native && cargo build --release
 ```
+
+Capture needs the external **zerocap** binary (and, for zero-copy plans, its
+`zerocopy-capture` helper). Build it from
+[souta-lab/zerocap](https://github.com/souta-lab/zerocap) and install both
+into `~/.local/bin`, or point `ZEROCAP_BIN` at the binary:
+
+```bash
+git clone https://github.com/souta-lab/zerocap && cd zerocap
+./build.sh                                   # cargo build --release + gpu/build.sh
+install -m 755 target/release/zerocap target/release/zerocap-probe gpu/zerocopy-capture ~/.local/bin/
+zerocap-probe                                # what will run on this machine, and why
+```
+
+`capture-sway.sh` exits with an error naming this repository if it cannot
+find zerocap.
 
 ### Secrets
 
@@ -136,11 +155,31 @@ tunnel; media never does.
 | `SWAYRTC_ALLOWED_ORIGINS` | – | extra accepted `Origin` hosts (comma separated) |
 | `SWAYRTC_DEBUG` | off | verbose signaling / ICE / input tracing |
 | `SWAYRTC_SIGNALING_URL` | `ws://127.0.0.1:8777/ws/host` | host → Bun WS |
-| `SWAYRTC_CAPTURE_BIN` | `capture-sway.sh` | capture command |
+| `SWAYRTC_CAPTURE_BIN` | `~/.local/bin/wl-screenrec` | capture command: point it at `capture-sway.sh` (which launches zerocap) or any wl-screenrec-compatible binary |
 | `SWAYRTC_PUBLIC_IP` | `auto` | extra direct candidates: `auto`, `off`, or an explicit IPv4 |
 | `SWAYRTC_INPUT_BACKEND` | `native` | `legacy` forces wtype/wlrctl |
 | `SWAYRTC_INPUT_RELATIVE` | off | relative instead of absolute pointer motion |
 | `SWAYRTC_PASTE_SHIFT` | off | paste Unicode text with Ctrl+Shift+V (terminals) |
+
+Capture settings are read by `capture-sway.sh`, which translates them into
+zerocap's `ZEROCAP_*` environment. A `ZEROCAP_*` variable that is already set
+wins; an unset one leaves zerocap's own default in place.
+
+| Variable | Passed to zerocap as | Meaning |
+| --- | --- | --- |
+| `SWAYRTC_OUTPUT` | `ZEROCAP_OUTPUT` | output to capture; `host-start.sh` sets the session's connector (fallback `HEADLESS-1`) |
+| `SWAYRTC_ENCODER` | `ZEROCAP_ENCODER` | `auto` (planner, zerocap's default), `x264`, `vaapi` (`qsv` is accepted as an alias), `zerocopy` |
+| `SWAYRTC_FPS` | `ZEROCAP_FPS` | frame rate |
+| `SWAYRTC_BITRATE` | `ZEROCAP_BITRATE` + `ZEROCAP_BITRATE_KBPS` | e.g. `6M`, `800k`; converted to integer kbps for the zero-copy pipeline |
+| `SWAYRTC_QP` / `SWAYRTC_GOP` | `ZEROCAP_QP` / `ZEROCAP_GOP` | encoder tuning |
+| `SWAYRTC_VA_DEVICE` | `ZEROCAP_VA_DEVICE` | VA-API render node for the `vaapi` path |
+| `SWAYRTC_ZEROCOPY_CAPTURE_DEVICE` / `SWAYRTC_ZEROCOPY_ENCODE_DEVICE` | `ZEROCAP_ZEROCOPY_*` | zero-copy device roles |
+| `ZEROCAP_BIN` | – | path to the zerocap binary (else `zerocap` on `PATH`, else `~/.local/bin/zerocap`) |
+| `SWAYRTC_DRY_RUN` | – | `1` prints the resolved zerocap command instead of running it |
+
+`SWAYRTC_BITRATE_KBPS`, `SWAYRTC_CAPTURE_DEVICE`, `SWAYRTC_RC`,
+`SWAYRTC_VBV`, `SWAYRTC_TIMING` and `SWAYRTC_CAPTURE_LOG` are passed through
+the same way under their `ZEROCAP_` names.
 
 <a name="design-decisions"></a>
 ## 🧠 Design decisions
@@ -179,20 +218,28 @@ wayland socket moves between restarts; `host-start.sh` exports it, passes
 viewer hides the local one while a stream is live, so the remote picture is what
 the monitor shows and pointer-lock mode still has a cursor.
 
-### Capture: our own wlr-screencopy client
+### Capture: our own wlr-screencopy client (now zerocap)
 
-`native/src/bin/swayrtc-capture.rs` captures `HEADLESS-1` itself through
-`zwlr_screencopy_manager_v1`, converts the XRGB buffer to NV12 across a few
-threads, and drives FFmpeg over a pipe. It replaces `wf-recorder`, which kept
-several captured frames in its own pool: with a full-screen stimulus the
-pipeline now needs **21 ms** (7 ms floor) for capture+encode instead of 35 ms.
-Having the capture in-process also gives exact access-unit boundaries and one
-process less to supervise. `capture-sway.sh` prefers the binary and falls back
-to wf-recorder if it has not been built.
+The capture was written for this project and has since moved to its own
+repository, [zerocap](https://github.com/souta-lab/zerocap) (DESIGN.md §6).
+The host's side of the contract did not change: it spawns
+`$SWAYRTC_CAPTURE_BIN` and reads Annex-B H.264 from its stdout.
+`capture-sway.sh` is that command; it translates the `SWAYRTC_*` settings and
+execs zerocap. There is no wf-recorder fallback any more.
+
+The measurements in this section and the next were taken while the capture
+still lived here (`native/src/bin/swayrtc-capture.rs`, `native/gpu/`).
+
+The capture talks `zwlr_screencopy_manager_v1` itself, converts the XRGB
+buffer to NV12 across a few threads, and drives FFmpeg over a pipe. It
+replaced `wf-recorder`, which kept several captured frames in its own pool:
+with a full-screen stimulus the pipeline needed **21 ms** (7 ms floor) for
+capture+encode instead of 35 ms. Owning the capture also gives exact
+access-unit boundaries and one process less to supervise.
 
 The encoder is picked at start:
 
-* **x264** (default) - lowest latency: 21 ms capture+encode, ~109 ms end to end.
+* **x264** (the default before the planner) - lowest latency: 21 ms capture+encode, ~109 ms end to end.
 * **qsv** (`SWAYRTC_ENCODER=qsv`) - FFmpeg uploads the NV12 with `hwupload` and
   encodes with `h264_vaapi` (Constrained Baseline, CQP). Half the CPU (79% vs
   159%) but **82 ms** capture+encode: the Intel LP encoder (the only H.264
@@ -215,7 +262,8 @@ Three constraints, all measured:
 
 ### Zero copy: working, as an option
 
-`native/gpu/zerocopy-capture.c` is a complete GPU-only pipeline:
+zerocap's `gpu/zerocopy-capture.c` (kept in this repository as `native/gpu/`
+until phase 3) is a complete GPU-only pipeline:
 
 ```
 wlr-screencopy -> ARGB dma-buf (AMD, where the monitor hangs)
@@ -267,8 +315,9 @@ delimiter right after the slices. The encoder itself answers in 2-3 ms and the
 capture loop is 16 ms per frame (10 ms compositor copy + 3 ms VPP + 3 ms encode).
 
 ```
+SWAYRTC_ENCODER=auto       # default: zerocap's planner picks per machine
 SWAYRTC_ENCODER=zerocopy   # cross-GPU pipeline: 4% CPU, 39 ms capture+encode
-SWAYRTC_ENCODER=x264       # default: software encode, latency first
+SWAYRTC_ENCODER=x264       # software encode, latency first
 ```
 
 ### Zero copy: the earlier dead end
@@ -390,8 +439,9 @@ its tunnel) are stopped and disabled; nothing in this repository depends on them
 * Media goes through Cloudflare TURN by default: expect one extra network hop and
   relay bandwidth accounting. Switch `PATH POLICY` to `Auto` on networks where
   direct UDP is possible.
-* The default encoder is software x264 (~160% CPU at 1080p60). The VA-API and
-  zero-copy paths cut CPU sharply but add encode latency (see above).
+* Software x264 costs ~160% CPU at 1080p60. The VA-API and zero-copy paths
+  cut CPU sharply but add encode latency (see above); with
+  `SWAYRTC_ENCODER` unset, zerocap's planner chooses.
 * The headless output can stop repainting after long idle periods, leaving stale
   content in the captured buffer. Continuous capture (`-D`) and a `swaybg`
   restart both force a full repaint.
@@ -404,9 +454,8 @@ server.ts              Bun: PAM auth, sessions, /api/ice, WSS signaling, static 
 web/                   UI (no build step, no external CDN, strict CSP)
 native/src/main.rs     WebRTC host, capture supervision, peer lifecycle
 native/src/input.rs    Wayland virtual keyboard / pointer
-native/gpu/            cross-GPU zero-copy capture (C; dma-buf: AMD VPP → Intel VA-API)
 native/protocols/      vendored protocol XML for offline builds
-capture-sway.sh        capture entry point: native client first, wf-recorder fallback
+capture-sway.sh        capture launcher: SWAYRTC_* → ZEROCAP_*, execs the external zerocap
 mock-capture.sh        synthetic 60 fps source for throughput tests
 tools/                 test environment, E2E, auth regression suites
 ```

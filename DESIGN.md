@@ -1,6 +1,7 @@
 # Generalizing SwayRTC: capability probe, planner, portable capture
 
-Status: design + phase 1 prototype (`native/src/bin/swayrtc-probe.rs`).
+Status: design + phase 1 prototype (`native/src/bin/swayrtc-probe.rs`,
+since moved to zerocap; phase 2 in §6, phase 3 prep in §7).
 Target: SwayRTC should run on any Sway machine, not only the reference
 machine it was developed on. The capture pipeline in particular must adapt
 to whatever GPUs are installed instead of assuming one specific pair.
@@ -251,3 +252,23 @@ Phase 2 is implemented on branch `feat/planner-integration`:
   unchanged: `SWAYRTC_CAPTURE_BIN` is the seam through which the host
   can later point at a zerocap build. Removing the in-tree copy is
   phase 3, to be done only after such a switch is proven in production.
+
+## 7. Status addendum (2026-11-12, phase 3 prep)
+
+On branch `feat/phase3-external-zerocap` (not merged; merging waits for
+the production switch that §6 asks for):
+
+- The in-tree capture is removed: `native/src/bin/swayrtc-capture.rs`,
+  `native/src/bin/swayrtc-probe.rs`, `native/src/caps.rs`, the lib target
+  (`native/src/lib.rs`) and `native/gpu/`. The crate builds only the
+  `swayrtc-host` binary and no longer links libva;
+  `wayland-protocols-wlr` and `libc` are dropped from `Cargo.toml`.
+- Capture is external: `capture-sway.sh` is a thin launcher that locates
+  `zerocap` (`$ZEROCAP_BIN`, `PATH`, `~/.local/bin/zerocap`), translates
+  `SWAYRTC_*` settings to `ZEROCAP_*` (explicit `ZEROCAP_*` wins) and
+  execs it. There is no wf-recorder fallback.
+- The host seam is unchanged: `swayrtc-host` still spawns
+  `$SWAYRTC_CAPTURE_BIN` with wl-screenrec-style argv and reads Annex-B
+  H.264 from stdout; `capture-sway.sh` accepts and ignores that argv.
+- Operators must install zerocap (and its `zerocopy-capture` helper for
+  zero-copy plans) before this lands.

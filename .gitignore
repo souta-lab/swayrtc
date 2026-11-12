@@ -2,4 +2,3 @@
 node_modules/
 native/target/
 *.log
-native/gpu/zerocopy-capture
